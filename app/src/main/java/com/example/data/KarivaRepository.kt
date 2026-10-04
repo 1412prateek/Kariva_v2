@@ -5,6 +5,8 @@ import android.util.Log
 import com.example.R
 import com.example.model.*
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.CoroutineScope
@@ -331,11 +333,7 @@ class KarivaRepository private constructor(private val context: Context) {
         )
     }
 
-    private val authPrefs by lazy {
-        context.getSharedPreferences("kariva_auth_users", Context.MODE_PRIVATE)
-    }
-
-    // Authentication methods with strict validation
+    // Authentication methods with direct Firebase Authentication
     suspend fun signIn(email: String, pass: String): Result<UserProfile> {
         val cleanEmail = email.trim().lowercase(Locale.ROOT)
         val isCreator = cleanEmail == "shikha@kariva.com"
@@ -349,8 +347,34 @@ class KarivaRepository private constructor(private val context: Context) {
             if (pass != "Shikha@1810") {
                 return Result.failure(Exception("Invalid creator credentials. Access denied."))
             }
+            // Ensure creator is also registered in Firebase
+            val fbCreator = auth
+            if (fbCreator != null) {
+                try {
+                    fbCreator.signInWithEmailAndPassword(cleanEmail, pass).await()
+                } catch (_: Exception) {
+                    try {
+                        val res = fbCreator.createUserWithEmailAndPassword(cleanEmail, pass).await()
+                        res.user?.updateProfile(
+                            UserProfileChangeRequest.Builder()
+                                .setDisplayName("Shikha (Crochet Creator)")
+                                .build()
+                        )?.await()
+                        firestore?.collection("users")?.document(res.user?.uid ?: "creator_shikha")?.set(
+                            hashMapOf(
+                                "uid" to (res.user?.uid ?: "creator_shikha"),
+                                "name" to "Shikha",
+                                "email" to cleanEmail,
+                                "role" to "CREATOR",
+                                "createdAt" to System.currentTimeMillis()
+                            )
+                        )?.await()
+                    } catch (_: Exception) {}
+                }
+            }
+
             val creatorProfile = UserProfile(
-                id = "creator_shikha",
+                id = auth?.currentUser?.uid ?: "creator_shikha",
                 email = "shikha@kariva.com",
                 displayName = "Shikha (Crochet Creator)",
                 role = UserRole.CREATOR,
@@ -360,40 +384,46 @@ class KarivaRepository private constructor(private val context: Context) {
             return Result.success(creatorProfile)
         }
 
-        // Customer authentication check
-        val storedPass = authPrefs.getString("user_${cleanEmail}_pass", null)
-        val storedName = authPrefs.getString("user_${cleanEmail}_name", null)
-
-        if (storedPass == null) {
-            // Check Firebase Auth if available
-            var firebaseSuccess = false
-            try {
-                if (auth != null) {
-                    val authResult = auth?.signInWithEmailAndPassword(cleanEmail, pass)?.await()
-                    if (authResult?.user != null) {
-                        firebaseSuccess = true
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w("KarivaRepo", "Firebase signIn check: ${e.message}")
-            }
-
-            if (!firebaseSuccess) {
-                return Result.failure(Exception("User not registered. Please register first."))
-            }
-        } else if (storedPass != pass) {
-            return Result.failure(Exception("Invalid credentials. Please check your password."))
+        // Customer authentication via Firebase Auth
+        val fb = auth
+        if (fb == null) {
+            return Result.failure(Exception("Firebase Authentication is not initialized."))
         }
 
-        val profile = UserProfile(
-            id = "user_${cleanEmail.hashCode().toString().replace("-", "")}",
-            email = cleanEmail,
-            displayName = storedName ?: cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() },
-            role = UserRole.CUSTOMER,
-            loyaltyTier = "Kariva Artisan Patron"
-        )
-        _currentUser.value = profile
-        return Result.success(profile)
+        try {
+            val authResult = fb.signInWithEmailAndPassword(cleanEmail, pass).await()
+            val fbUser = authResult.user ?: throw Exception("Authentication returned empty user session.")
+            val uid = fbUser.uid
+            val displayName = fbUser.displayName ?: cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
+
+            val profile = UserProfile(
+                id = uid,
+                email = cleanEmail,
+                displayName = displayName,
+                role = UserRole.CUSTOMER,
+                loyaltyTier = "Kariva Artisan Patron"
+            )
+            _currentUser.value = profile
+            return Result.success(profile)
+        } catch (e: Exception) {
+            Log.e("KarivaRepo", "Firebase signIn error: ${e.message}", e)
+            val rawMsg = e.localizedMessage ?: e.message ?: ""
+            val userMsg = when {
+                rawMsg.contains("user-not-found", ignoreCase = true) ||
+                rawMsg.contains("no user record", ignoreCase = true) ||
+                rawMsg.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ->
+                    "User not registered. Please register first."
+                rawMsg.contains("wrong-password", ignoreCase = true) ->
+                    "Invalid credentials. Please check your password."
+                rawMsg.contains("CONFIGURATION_NOT_FOUND", ignoreCase = true) ||
+                rawMsg.contains("disabled", ignoreCase = true) ->
+                    "Firebase Email/Password provider is disabled. Please enable 'Email/Password' in Firebase Console under Sign-in method tab."
+                rawMsg.contains("network-request-failed", ignoreCase = true) ->
+                    "Network error. Please check your internet connection."
+                else -> rawMsg
+            }
+            return Result.failure(Exception(userMsg))
+        }
     }
 
     suspend fun signUp(name: String, email: String, pass: String): Result<UserProfile> {
@@ -410,33 +440,72 @@ class KarivaRepository private constructor(private val context: Context) {
             return Result.failure(Exception("Password must be at least 6 characters."))
         }
 
-        // Check if user is already registered
-        if (authPrefs.contains("user_${cleanEmail}_pass")) {
-            return Result.failure(Exception("Email is already registered. Please login."))
+        val fb = auth
+        if (fb == null) {
+            return Result.failure(Exception("Firebase Authentication is not initialized."))
         }
 
-        // Persist customer account credentials
-        authPrefs.edit()
-            .putString("user_${cleanEmail}_pass", pass)
-            .putString("user_${cleanEmail}_name", name.trim())
-            .apply()
-
-        // Background Firebase Auth registration if available
         try {
-            auth?.createUserWithEmailAndPassword(cleanEmail, pass)?.await()
-        } catch (e: Exception) {
-            Log.w("KarivaRepo", "Firebase signUp background attempt: ${e.message}")
-        }
+            // Real Firebase createUser call
+            val authResult = fb.createUserWithEmailAndPassword(cleanEmail, pass).await()
+            val fbUser = authResult.user ?: throw Exception("Failed to retrieve created Firebase user.")
+            val uid = fbUser.uid
 
-        val profile = UserProfile(
-            id = "user_${UUID.randomUUID().toString().take(8)}",
-            email = cleanEmail,
-            displayName = name.trim(),
-            role = if (isCreator) UserRole.CREATOR else UserRole.CUSTOMER,
-            loyaltyTier = if (isCreator) "Kariva Master Knitter & Founder" else "Kariva Artisan Patron"
-        )
-        _currentUser.value = profile
-        return Result.success(profile)
+            // Set user profile display name in Firebase
+            try {
+                fbUser.updateProfile(
+                    UserProfileChangeRequest.Builder()
+                        .setDisplayName(name.trim())
+                        .build()
+                ).await()
+            } catch (pe: Exception) {
+                Log.w("KarivaRepo", "Profile name update notice: ${pe.message}")
+            }
+
+            // Sync user to Firestore "users" collection so it appears in database
+            try {
+                firestore?.collection("users")?.document(uid)?.set(
+                    hashMapOf(
+                        "uid" to uid,
+                        "name" to name.trim(),
+                        "email" to cleanEmail,
+                        "role" to if (isCreator) "CREATOR" else "CUSTOMER",
+                        "createdAt" to System.currentTimeMillis()
+                    )
+                )?.await()
+            } catch (fe: Exception) {
+                Log.w("KarivaRepo", "Firestore users sync notice: ${fe.message}")
+            }
+
+            val profile = UserProfile(
+                id = uid,
+                email = cleanEmail,
+                displayName = name.trim(),
+                role = if (isCreator) UserRole.CREATOR else UserRole.CUSTOMER,
+                loyaltyTier = if (isCreator) "Kariva Master Knitter & Founder" else "Kariva Artisan Patron"
+            )
+            _currentUser.value = profile
+            return Result.success(profile)
+        } catch (e: Exception) {
+            Log.e("KarivaRepo", "Firebase signUp error: ${e.message}", e)
+            val rawMsg = e.localizedMessage ?: e.message ?: ""
+            val userMsg = when {
+                rawMsg.contains("email-already-in-use", ignoreCase = true) ||
+                rawMsg.contains("already registered", ignoreCase = true) ->
+                    "Email is already registered. Please login."
+                rawMsg.contains("CONFIGURATION_NOT_FOUND", ignoreCase = true) ||
+                rawMsg.contains("disabled", ignoreCase = true) ->
+                    "Firebase Email/Password provider is disabled. Please enable 'Email/Password' in Firebase Console under Sign-in method tab."
+                rawMsg.contains("weak-password", ignoreCase = true) ->
+                    "Password is too weak. Please use at least 6 characters."
+                rawMsg.contains("invalid-email", ignoreCase = true) ->
+                    "Please enter a valid email address."
+                rawMsg.contains("network-request-failed", ignoreCase = true) ->
+                    "Network error. Please check your internet connection."
+                else -> rawMsg
+            }
+            return Result.failure(Exception(userMsg))
+        }
     }
 
     fun signOut() {
