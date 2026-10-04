@@ -18,13 +18,13 @@ Kariva is an exclusive one-to-many e-commerce mobile application and multiplatfo
 
 ### Remote Repository
 ```bash
-git remote add origin https://github.com/1412prateek/Kariva.git
+git remote add origin https://github.com/1412prateek/Kariva_v2.git
 git branch -M main
 ```
 
 ### Branch Protection Configuration
 To configure branch protection rules on GitHub as required:
-1. Navigate to your repository on GitHub: `https://github.com/1412prateek/Kariva`
+1. Navigate to your repository on GitHub: `https://github.com/1412prateek/Kariva_v2`
 2. Go to **Settings** > **Branches**.
 3. Under **Branch protection rules**, click **Add rule**.
 4. Set **Branch name pattern** to `main`.

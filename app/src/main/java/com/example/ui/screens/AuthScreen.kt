@@ -19,7 +19,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
@@ -32,42 +31,31 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.UserRole
 import com.example.ui.components.KarivaButton
 import com.example.ui.components.KarivaEmblem
 import com.example.ui.theme.*
 
 @Composable
 fun AuthScreen(
-    initialRole: UserRole = UserRole.CUSTOMER,
-    onLoginSuccess: (isCreator: Boolean) -> Unit,
-    onDirectRoleLogin: (UserRole) -> Unit,
+    initialIsCreator: Boolean = false,
+    onCustomerLogin: (email: String, pass: String, onError: (String) -> Unit) -> Unit,
+    onCustomerSignUp: (name: String, email: String, pass: String, onError: (String) -> Unit) -> Unit,
+    onCreatorLogin: (email: String, pass: String, onError: (String) -> Unit) -> Unit,
     onBack: () -> Unit
 ) {
     var isSignUpTab by remember { mutableStateOf(false) }
-    var isCreatorMode by remember { mutableStateOf(initialRole == UserRole.CREATOR) }
+    var isCreatorMode by remember { mutableStateOf(initialIsCreator) }
 
+    // Pristine, clean inputs without any prefilled credentials
     var fullName by remember { mutableStateOf("") }
-    var email by remember {
-        mutableStateOf(if (isCreatorMode) "shikha@kariva.com" else "sana.ansari@gmail.com")
-    }
-    var password by remember {
-        mutableStateOf(if (isCreatorMode) "Shikha@1810" else "Shopper@123")
-    }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var rememberMe by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
 
     val focusManager = LocalFocusManager.current
-
-    // Sync credentials if creator mode toggled
-    LaunchedEffect(isCreatorMode) {
-        if (isCreatorMode) {
-            email = "shikha@kariva.com"
-            password = "Shikha@1810"
-        }
-    }
 
     Box(
         modifier = Modifier
@@ -105,17 +93,21 @@ fun AuthScreen(
                     )
                 }
 
-                // Discrect top-right Creator Mode toggle button requested by user
+                // Discreet top-right Creator Mode toggle
                 Surface(
                     onClick = {
                         isCreatorMode = !isCreatorMode
+                        isSignUpTab = false
                         errorMessage = null
+                        email = ""
+                        password = ""
+                        fullName = ""
                     },
                     shape = RoundedCornerShape(20.dp),
-                    color = if (isCreatorMode) KarivaGoldContainer else Color.White,
+                    color = if (isCreatorMode) KarivaTerracottaContainer else Color.White,
                     border = androidx.compose.foundation.BorderStroke(
                         1.dp,
-                        if (isCreatorMode) KarivaGold else KarivaBorder
+                        if (isCreatorMode) KarivaTerracotta else KarivaBorder
                     ),
                     modifier = Modifier
                         .height(36.dp)
@@ -128,15 +120,15 @@ fun AuthScreen(
                         Icon(
                             imageVector = if (isCreatorMode) Icons.Filled.Storefront else Icons.Outlined.Shield,
                             contentDescription = null,
-                            tint = if (isCreatorMode) KarivaGoldDark else KarivaTextSecondary,
+                            tint = if (isCreatorMode) KarivaTerracotta else KarivaTextSecondary,
                             modifier = Modifier.size(15.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (isCreatorMode) "Creator Portal Active" else "Creator Portal",
+                            text = if (isCreatorMode) "Creator Portal" else "Creator Login",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (isCreatorMode) KarivaGoldDark else KarivaCharcoal
+                            color = if (isCreatorMode) KarivaTerracotta else KarivaCharcoal
                         )
                     }
                 }
@@ -160,65 +152,88 @@ fun AuthScreen(
             )
 
             Text(
-                text = if (isCreatorMode) "Crochet Creator Studio" else "Handmade with Love, Loop by Loop 🧶",
+                text = if (isCreatorMode) "Atelier Creator Studio Login" else "Handmade with Love, Loop by Loop 🧶",
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (isCreatorMode) KarivaTerracotta else KarivaTextSecondary
             )
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Tab bar (Login / Sign Up)
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(24.dp),
-                color = KarivaSurfaceCard
-            ) {
-                Row(modifier = Modifier.fillMaxSize()) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .padding(4.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (!isSignUpTab) KarivaCharcoal else Color.Transparent)
-                            .clickable { isSignUpTab = false }
-                            .testTag("auth_tab_login"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Login",
-                            fontWeight = if (!isSignUpTab) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (!isSignUpTab) Color.White else KarivaTextSecondary,
-                            fontSize = 14.sp
-                        )
-                    }
+            // Customer Tab Bar (Login / Sign Up) - Only shown for Shoppers
+            if (!isCreatorMode) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    color = KarivaSurfaceCard
+                ) {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .padding(4.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (!isSignUpTab) KarivaCharcoal else Color.Transparent)
+                                .clickable {
+                                    isSignUpTab = false
+                                    errorMessage = null
+                                }
+                                .testTag("auth_tab_login"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Login",
+                                fontWeight = if (!isSignUpTab) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (!isSignUpTab) Color.White else KarivaTextSecondary,
+                                fontSize = 14.sp
+                            )
+                        }
 
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .padding(4.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (isSignUpTab) KarivaCharcoal else Color.Transparent)
-                            .clickable { isSignUpTab = true }
-                            .testTag("auth_tab_signup"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Sign Up",
-                            fontWeight = if (isSignUpTab) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (isSignUpTab) Color.White else KarivaTextSecondary,
-                            fontSize = 14.sp
-                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .padding(4.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (isSignUpTab) KarivaCharcoal else Color.Transparent)
+                                .clickable {
+                                    isSignUpTab = true
+                                    errorMessage = null
+                                }
+                                .testTag("auth_tab_signup"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Sign Up",
+                                fontWeight = if (isSignUpTab) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isSignUpTab) Color.White else KarivaTextSecondary,
+                                fontSize = 14.sp
+                            )
+                        }
                     }
                 }
+                Spacer(modifier = Modifier.height(24.dp))
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = KarivaTerracottaContainer,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, KarivaTerracotta.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "🔒 Creator Authorization Required\nSign in to manage product listings, inventory, and order fulfillment.",
+                        fontSize = 12.sp,
+                        color = KarivaTerracotta,
+                        lineHeight = 17.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Error notice if any
+            // Error notice
             AnimatedVisibility(visible = errorMessage != null) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -237,11 +252,11 @@ fun AuthScreen(
                 }
             }
 
-            // Input Fields matching screenshot
-            if (isSignUpTab) {
+            // Input Fields
+            if (isSignUpTab && !isCreatorMode) {
                 OutlinedTextField(
                     value = fullName,
-                    onValueChange = { fullName = it },
+                    onValueChange = { fullName = it; errorMessage = null },
                     label = { Text("Full Name") },
                     leadingIcon = {
                         Icon(Icons.Outlined.Person, contentDescription = null, tint = KarivaTextMuted)
@@ -266,7 +281,7 @@ fun AuthScreen(
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it; errorMessage = null },
-                label = { Text(if (isCreatorMode) "Creator Email" else "Email or Phone Number") },
+                label = { Text(if (isCreatorMode) "Creator Email Address" else "Email Address") },
                 leadingIcon = {
                     Icon(Icons.Outlined.Email, contentDescription = null, tint = KarivaTextMuted)
                 },
@@ -274,7 +289,7 @@ fun AuthScreen(
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = Color.White,
                     unfocusedContainerColor = Color.White,
-                    focusedBorderColor = KarivaCharcoal,
+                    focusedBorderColor = if (isCreatorMode) KarivaTerracotta else KarivaCharcoal,
                     unfocusedBorderColor = KarivaBorder
                 ),
                 modifier = Modifier
@@ -308,7 +323,7 @@ fun AuthScreen(
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = Color.White,
                     unfocusedContainerColor = Color.White,
-                    focusedBorderColor = KarivaCharcoal,
+                    focusedBorderColor = if (isCreatorMode) KarivaTerracotta else KarivaCharcoal,
                     unfocusedBorderColor = KarivaBorder
                 ),
                 modifier = Modifier
@@ -335,177 +350,191 @@ fun AuthScreen(
                         checked = rememberMe,
                         onCheckedChange = { rememberMe = it },
                         colors = CheckboxDefaults.colors(
-                            checkedColor = KarivaCharcoal,
+                            checkedColor = if (isCreatorMode) KarivaTerracotta else KarivaCharcoal,
                             checkmarkColor = Color.White
                         )
                     )
                     Text("Remember me", fontSize = 12.5.sp, color = KarivaTextPrimary)
                 }
 
-                Text(
-                    text = "Forgot Password?",
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = KarivaCharcoal,
-                    modifier = Modifier.clickable {
-                        errorMessage = "Password reset instructions sent to $email"
-                    }
-                )
+                if (!isCreatorMode) {
+                    Text(
+                        text = "Forgot Password?",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = KarivaCharcoal,
+                        modifier = Modifier.clickable {
+                            if (email.isNotBlank()) {
+                                errorMessage = "Password reset instructions sent to $email"
+                            } else {
+                                errorMessage = "Please enter your email above first."
+                            }
+                        }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Main Action Button
+            // Primary Action Button
             KarivaButton(
-                text = if (isLoading) "Authenticating..." else (if (isSignUpTab) "Create Account" else "Login"),
+                text = if (isLoading) "Authenticating..." else (
+                    if (isCreatorMode) "Log In to Creator Studio"
+                    else if (isSignUpTab) "Create Customer Account"
+                    else "Log In"
+                ),
                 onClick = {
                     focusManager.clearFocus()
                     if (email.isBlank() || password.isBlank()) {
-                        errorMessage = "Please enter both email and password"
+                        errorMessage = "Please enter your email and password."
                         return@KarivaButton
                     }
-                    val isCreator = email.trim().equals("shikha@kariva.com", ignoreCase = true)
-                    onLoginSuccess(isCreator)
+
+                    if (isCreatorMode) {
+                        isLoading = true
+                        onCreatorLogin(email.trim(), password) { err ->
+                            isLoading = false
+                            errorMessage = err
+                        }
+                    } else if (isSignUpTab) {
+                        if (fullName.isBlank()) {
+                            errorMessage = "Please enter your full name."
+                            return@KarivaButton
+                        }
+                        if (password.length < 6) {
+                            errorMessage = "Password must be at least 6 characters."
+                            return@KarivaButton
+                        }
+                        isLoading = true
+                        onCustomerSignUp(fullName.trim(), email.trim(), password) { err ->
+                            isLoading = false
+                            errorMessage = err
+                        }
+                    } else {
+                        isLoading = true
+                        onCustomerLogin(email.trim(), password) { err ->
+                            isLoading = false
+                            errorMessage = err
+                            if (err.contains("not registered", ignoreCase = true) || err.contains("register first", ignoreCase = true)) {
+                                isSignUpTab = true
+                            }
+                        }
+                    }
                 },
                 enabled = !isLoading,
+                isTerracotta = isCreatorMode,
                 testTag = "auth_submit_btn"
             )
 
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // Quick Demo Credentials chips for testing convenience
-            Text(
-                text = "⚡ QUICK DEMO ACCESS",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp,
-                color = KarivaTextMuted
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
+            // Switch to shopper if in creator mode
+            if (isCreatorMode) {
+                Spacer(modifier = Modifier.height(16.dp))
+                TextButton(
                     onClick = {
-                        email = "sana.ansari@gmail.com"
-                        password = "Password@123"
                         isCreatorMode = false
-                        onDirectRoleLogin(UserRole.CUSTOMER)
-                    },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = KarivaCharcoal),
-                    modifier = Modifier.weight(1f).testTag("quick_login_customer")
+                        errorMessage = null
+                        email = ""
+                        password = ""
+                    }
                 ) {
-                    Text("🛍️ Shopper", fontSize = 12.sp)
+                    Text(
+                        "← Back to Customer Shopping",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = KarivaCharcoal
+                    )
+                }
+            }
+
+            // Customer Social Login Options
+            if (!isCreatorMode) {
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Divider(modifier = Modifier.weight(1f), color = KarivaBorder)
+                    Text(
+                        text = "  or  ",
+                        fontSize = 12.sp,
+                        color = KarivaTextMuted
+                    )
+                    Divider(modifier = Modifier.weight(1f), color = KarivaBorder)
                 }
 
-                OutlinedButton(
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Surface(
                     onClick = {
-                        email = "shikha@kariva.com"
-                        password = "Shikha@1810"
-                        isCreatorMode = true
-                        onDirectRoleLogin(UserRole.CREATOR)
+                        onCustomerLogin("google.shopper@kariva.com", "Password@123") { err ->
+                            errorMessage = err
+                        }
                     },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = KarivaGoldContainer,
-                        contentColor = KarivaGoldDark
-                    ),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, KarivaGold),
-                    modifier = Modifier.weight(1f).testTag("quick_login_creator")
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color.White,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, KarivaBorder),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("google_login_btn")
                 ) {
-                    Text("👑 Creator (Shikha)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AccountCircle,
+                            contentDescription = null,
+                            tint = KarivaCharcoal,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Continue with Google",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = KarivaCharcoal
+                        )
+                    }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-            // Social Logins (Google / Apple) matching screenshot
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Divider(modifier = Modifier.weight(1f), color = KarivaBorder)
-                Text(
-                    text = "  or  ",
-                    fontSize = 12.sp,
-                    color = KarivaTextMuted
-                )
-                Divider(modifier = Modifier.weight(1f), color = KarivaBorder)
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Continue with Google
-            Surface(
-                onClick = {
-                    onLoginSuccess(false)
-                },
-                shape = RoundedCornerShape(24.dp),
-                color = Color.White,
-                border = androidx.compose.foundation.BorderStroke(1.dp, KarivaBorder),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("google_login_btn")
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    onClick = {
+                        onCustomerLogin("apple.shopper@kariva.com", "Password@123") { err ->
+                            errorMessage = err
+                        }
+                    },
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color.White,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, KarivaBorder),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("apple_login_btn")
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.AccountCircle,
-                        contentDescription = null,
-                        tint = KarivaCharcoal,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Continue with Google",
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = KarivaCharcoal
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Continue with Apple
-            Surface(
-                onClick = {
-                    onLoginSuccess(false)
-                },
-                shape = RoundedCornerShape(24.dp),
-                color = Color.White,
-                border = androidx.compose.foundation.BorderStroke(1.dp, KarivaBorder),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("apple_login_btn")
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.PhoneIphone,
-                        contentDescription = null,
-                        tint = KarivaCharcoal,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Continue with Apple",
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = KarivaCharcoal
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PhoneIphone,
+                            contentDescription = null,
+                            tint = KarivaCharcoal,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Continue with Apple",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = KarivaCharcoal
+                        )
+                    }
                 }
             }
 

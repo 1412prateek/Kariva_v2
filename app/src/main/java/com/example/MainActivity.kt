@@ -8,20 +8,26 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.model.UserRole
 import com.example.ui.components.KarivaBottomNavigation
 import com.example.ui.screens.*
 import com.example.ui.theme.KarivaCreamBg
+import com.example.ui.theme.KarivaTerracotta
+import com.example.ui.theme.KarivaTerracottaContainer
 import com.example.ui.theme.KarivaTheme
 import com.example.viewmodel.KarivaViewModel
 import com.example.viewmodel.Screen
@@ -81,7 +87,7 @@ fun KarivaApp(viewModel: KarivaViewModel = viewModel()) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFEFE8DF)), // luxury outer canvas for tablets/desktop
+            .background(Color(0xFFEFE8DF)),
         contentAlignment = Alignment.Center
     ) {
         Box(
@@ -92,6 +98,44 @@ fun KarivaApp(viewModel: KarivaViewModel = viewModel()) {
                 .background(KarivaCreamBg)
         ) {
             Scaffold(
+                topBar = {
+                    // Show a discrete banner if Creator is previewing the customer storefront
+                    if (currentUser?.role == UserRole.CREATOR && currentScreen in listOf(
+                            Screen.HOME, Screen.CATEGORIES, Screen.PRODUCT_DETAIL, Screen.CART, Screen.WISHLIST
+                        )
+                    ) {
+                        Surface(
+                            color = KarivaTerracottaContainer,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "👑 Creator Preview Mode",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = KarivaTerracotta
+                                )
+                                Text(
+                                    text = "Back to Studio →",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = KarivaTerracotta,
+                                    modifier = Modifier.clickable {
+                                        viewModel.navigateTo(Screen.CREATOR_DASHBOARD)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                },
                 bottomBar = {
                     val showBottomNav = currentScreen in listOf(
                         Screen.HOME,
@@ -137,7 +181,10 @@ fun KarivaApp(viewModel: KarivaViewModel = viewModel()) {
 
                             Screen.ONBOARDING -> {
                                 OnboardingScreen(
-                                    onGetStarted = { viewModel.navigateTo(Screen.HOME) },
+                                    onGetStarted = {
+                                        viewModel.setAuthTargetRole(UserRole.CUSTOMER)
+                                        viewModel.navigateTo(Screen.AUTH)
+                                    },
                                     onLogin = {
                                         viewModel.setAuthTargetRole(UserRole.CUSTOMER)
                                         viewModel.navigateTo(Screen.AUTH)
@@ -147,22 +194,33 @@ fun KarivaApp(viewModel: KarivaViewModel = viewModel()) {
 
                             Screen.AUTH -> {
                                 AuthScreen(
-                                    initialRole = viewModel.authRoleTarget.value,
-                                    onLoginSuccess = { isCreator ->
-                                        if (isCreator) {
+                                    initialIsCreator = viewModel.authRoleTarget.value == UserRole.CREATOR,
+                                    onCustomerLogin = { email, pass, onError ->
+                                        viewModel.login(
+                                            email, pass,
+                                            onSuccess = {},
+                                            onError = onError
+                                        )
+                                    },
+                                    onCustomerSignUp = { name, email, pass, onError ->
+                                        viewModel.signup(
+                                            name, email, pass,
+                                            onSuccess = {},
+                                            onError = onError
+                                        )
+                                    },
+                                    onCreatorLogin = { email, pass, onError ->
+                                        if (email.trim().equals("shikha@kariva.com", ignoreCase = true) && pass == "Shikha@1810") {
                                             viewModel.login(
-                                                "shikha@kariva.com", "Shikha@1810",
-                                                onSuccess = {}, onError = {}
+                                                email, pass,
+                                                onSuccess = {
+                                                    viewModel.navigateTo(Screen.CREATOR_DASHBOARD)
+                                                },
+                                                onError = onError
                                             )
                                         } else {
-                                            viewModel.login(
-                                                "sana.ansari@gmail.com", "Password@123",
-                                                onSuccess = {}, onError = {}
-                                            )
+                                            onError("Invalid creator credentials. Use authorized creator account.")
                                         }
-                                    },
-                                    onDirectRoleLogin = { role ->
-                                        viewModel.quickRoleSwitch(role)
                                     },
                                     onBack = { viewModel.navigateTo(Screen.WELCOME) }
                                 )
@@ -182,10 +240,7 @@ fun KarivaApp(viewModel: KarivaViewModel = viewModel()) {
                                     onCartClick = { viewModel.navigateTo(Screen.CART) },
                                     onWishlistClick = { viewModel.navigateTo(Screen.WISHLIST) },
                                     onSeeAllCategories = { viewModel.navigateTo(Screen.CATEGORIES) },
-                                    onCreatorPortalClick = {
-                                        viewModel.setAuthTargetRole(UserRole.CREATOR)
-                                        viewModel.navigateTo(Screen.CREATOR_DASHBOARD)
-                                    }
+                                    onMenuClick = { viewModel.navigateTo(Screen.CATEGORIES) }
                                 )
                             }
 
@@ -266,9 +321,6 @@ fun KarivaApp(viewModel: KarivaViewModel = viewModel()) {
                                     onWishlistClick = { viewModel.navigateTo(Screen.WISHLIST) },
                                     onNotificationsClick = { viewModel.navigateTo(Screen.NOTIFICATIONS) },
                                     onTrackOrderClick = { viewModel.openOrderTrack(it) },
-                                    onOpenCreatorStudio = {
-                                        viewModel.quickRoleSwitch(UserRole.CREATOR)
-                                    },
                                     onLogout = { viewModel.logout() }
                                 )
                             }
@@ -284,7 +336,7 @@ fun KarivaApp(viewModel: KarivaViewModel = viewModel()) {
                                     onUpdateStock = { id, stock -> viewModel.updateStock(id, stock) },
                                     onUpdateOrderStatus = { id, status -> viewModel.updateOrderStatus(id, status) },
                                     onSwitchToShopperView = {
-                                        viewModel.quickRoleSwitch(UserRole.CUSTOMER)
+                                        viewModel.navigateTo(Screen.HOME)
                                     },
                                     onLogout = { viewModel.logout() }
                                 )

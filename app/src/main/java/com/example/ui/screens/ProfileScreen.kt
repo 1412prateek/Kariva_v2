@@ -45,11 +45,10 @@ fun ProfileScreen(
     onWishlistClick: () -> Unit,
     onNotificationsClick: () -> Unit,
     onTrackOrderClick: (Order) -> Unit,
-    onOpenCreatorStudio: () -> Unit,
     onLogout: () -> Unit
 ) {
-    val displayName = user?.displayName ?: "Sana Ansari"
-    val email = user?.email ?: "sana.ansari@gmail.com"
+    val displayName = user?.displayName ?: "Shopper"
+    val email = user?.email ?: "shopper@kariva.com"
     val isCreator = user?.role == UserRole.CREATOR
 
     Box(
@@ -324,16 +323,6 @@ fun ProfileScreen(
                         icon = Icons.Outlined.Settings,
                         label = "Settings",
                         onClick = {}
-                    )
-
-                    // Creator Studio Direct Access
-                    ProfileDivider()
-                    ProfileMenuItem(
-                        icon = Icons.Filled.Storefront,
-                        label = "Creator Management Studio",
-                        badge = if (isCreator) "Owner" else "Demo Switch",
-                        isHighlight = true,
-                        onClick = onOpenCreatorStudio
                     )
                 }
             }

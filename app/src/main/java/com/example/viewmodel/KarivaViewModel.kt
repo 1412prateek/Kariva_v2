@@ -194,16 +194,6 @@ class KarivaViewModel(application: Application) : AndroidViewModel(application) 
         navigateTo(Screen.AUTH)
     }
 
-    fun quickRoleSwitch(role: UserRole) {
-        repository.switchRoleQuickDemo(role)
-        showToast("Switched to ${if (role == UserRole.CREATOR) "Creator (Shikha)" else "Shopper"} role")
-        if (role == UserRole.CREATOR) {
-            navigateTo(Screen.CREATOR_DASHBOARD)
-        } else {
-            navigateTo(Screen.HOME)
-        }
-    }
-
     // Cart actions
     fun addToCart(product: Product, tier: PricingTier, quantity: Int = 1) {
         repository.addToCart(product, tier, quantity)

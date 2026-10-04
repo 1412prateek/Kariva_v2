@@ -331,23 +331,66 @@ class KarivaRepository private constructor(private val context: Context) {
         )
     }
 
-    // Authentication methods
+    private val authPrefs by lazy {
+        context.getSharedPreferences("kariva_auth_users", Context.MODE_PRIVATE)
+    }
+
+    // Authentication methods with strict validation
     suspend fun signIn(email: String, pass: String): Result<UserProfile> {
         val cleanEmail = email.trim().lowercase(Locale.ROOT)
         val isCreator = cleanEmail == "shikha@kariva.com"
 
-        try {
-            auth?.signInWithEmailAndPassword(cleanEmail, pass)?.await()
-        } catch (e: Exception) {
-            Log.w("KarivaRepo", "Firebase login notice, role-based session: ${e.message}")
+        if (cleanEmail.isBlank() || pass.isBlank()) {
+            return Result.failure(Exception("Please enter both email and password."))
+        }
+
+        // Creator authentication check
+        if (isCreator) {
+            if (pass != "Shikha@1810") {
+                return Result.failure(Exception("Invalid creator credentials. Access denied."))
+            }
+            val creatorProfile = UserProfile(
+                id = "creator_shikha",
+                email = "shikha@kariva.com",
+                displayName = "Shikha (Crochet Creator)",
+                role = UserRole.CREATOR,
+                loyaltyTier = "Kariva Master Knitter & Founder"
+            )
+            _currentUser.value = creatorProfile
+            return Result.success(creatorProfile)
+        }
+
+        // Customer authentication check
+        val storedPass = authPrefs.getString("user_${cleanEmail}_pass", null)
+        val storedName = authPrefs.getString("user_${cleanEmail}_name", null)
+
+        if (storedPass == null) {
+            // Check Firebase Auth if available
+            var firebaseSuccess = false
+            try {
+                if (auth != null) {
+                    val authResult = auth?.signInWithEmailAndPassword(cleanEmail, pass)?.await()
+                    if (authResult?.user != null) {
+                        firebaseSuccess = true
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("KarivaRepo", "Firebase signIn check: ${e.message}")
+            }
+
+            if (!firebaseSuccess) {
+                return Result.failure(Exception("User not registered. Please register first."))
+            }
+        } else if (storedPass != pass) {
+            return Result.failure(Exception("Invalid credentials. Please check your password."))
         }
 
         val profile = UserProfile(
-            id = if (isCreator) "creator_shikha" else "user_${cleanEmail.hashCode()}",
+            id = "user_${cleanEmail.hashCode().toString().replace("-", "")}",
             email = cleanEmail,
-            displayName = if (isCreator) "Shikha (Crochet Creator)" else (cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() }),
-            role = if (isCreator) UserRole.CREATOR else UserRole.CUSTOMER,
-            loyaltyTier = if (isCreator) "Kariva Master Knitter & Founder" else "Kariva Artisan Patron"
+            displayName = storedName ?: cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() },
+            role = UserRole.CUSTOMER,
+            loyaltyTier = "Kariva Artisan Patron"
         )
         _currentUser.value = profile
         return Result.success(profile)
@@ -357,18 +400,40 @@ class KarivaRepository private constructor(private val context: Context) {
         val cleanEmail = email.trim().lowercase(Locale.ROOT)
         val isCreator = cleanEmail == "shikha@kariva.com"
 
+        if (name.isBlank()) {
+            return Result.failure(Exception("Please enter your full name."))
+        }
+        if (cleanEmail.isBlank() || !cleanEmail.contains("@") || !cleanEmail.contains(".")) {
+            return Result.failure(Exception("Please enter a valid email address."))
+        }
+        if (pass.length < 6) {
+            return Result.failure(Exception("Password must be at least 6 characters."))
+        }
+
+        // Check if user is already registered
+        if (authPrefs.contains("user_${cleanEmail}_pass")) {
+            return Result.failure(Exception("Email is already registered. Please login."))
+        }
+
+        // Persist customer account credentials
+        authPrefs.edit()
+            .putString("user_${cleanEmail}_pass", pass)
+            .putString("user_${cleanEmail}_name", name.trim())
+            .apply()
+
+        // Background Firebase Auth registration if available
         try {
             auth?.createUserWithEmailAndPassword(cleanEmail, pass)?.await()
         } catch (e: Exception) {
-            Log.w("KarivaRepo", "Firebase signup notice: ${e.message}")
+            Log.w("KarivaRepo", "Firebase signUp background attempt: ${e.message}")
         }
 
         val profile = UserProfile(
             id = "user_${UUID.randomUUID().toString().take(8)}",
             email = cleanEmail,
-            displayName = name.ifBlank { cleanEmail.substringBefore("@") },
+            displayName = name.trim(),
             role = if (isCreator) UserRole.CREATOR else UserRole.CUSTOMER,
-            loyaltyTier = "Kariva Artisan Patron"
+            loyaltyTier = if (isCreator) "Kariva Master Knitter & Founder" else "Kariva Artisan Patron"
         )
         _currentUser.value = profile
         return Result.success(profile)
@@ -377,26 +442,6 @@ class KarivaRepository private constructor(private val context: Context) {
     fun signOut() {
         auth?.signOut()
         _currentUser.value = null
-    }
-
-    fun switchRoleQuickDemo(role: UserRole) {
-        if (role == UserRole.CREATOR) {
-            _currentUser.value = UserProfile(
-                id = "creator_shikha",
-                email = "shikha@kariva.com",
-                displayName = "Shikha (Handcraft Creator)",
-                role = UserRole.CREATOR,
-                loyaltyTier = "Kariva Master Knitter"
-            )
-        } else {
-            _currentUser.value = UserProfile(
-                id = "usr_sana",
-                email = "sana.ansari@gmail.com",
-                displayName = "Sana Ansari",
-                role = UserRole.CUSTOMER,
-                loyaltyTier = "Kariva Artisan Patron"
-            )
-        }
     }
 
     // Product CRUD operations

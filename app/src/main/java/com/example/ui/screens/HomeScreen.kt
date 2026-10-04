@@ -50,7 +50,7 @@ fun HomeScreen(
     onCartClick: () -> Unit,
     onWishlistClick: () -> Unit,
     onSeeAllCategories: () -> Unit,
-    onCreatorPortalClick: () -> Unit
+    onMenuClick: () -> Unit
 ) {
     val categories = listOf(
         "All",
@@ -76,7 +76,7 @@ fun HomeScreen(
             onCartClick = onCartClick,
             onWishlistClick = onWishlistClick,
             wishlistCount = wishlist.size,
-            onMenuClick = onCreatorPortalClick
+            onMenuClick = onMenuClick
         )
 
         // Main Scrollable Grid
