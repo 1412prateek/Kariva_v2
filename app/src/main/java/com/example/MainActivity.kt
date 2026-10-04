@@ -202,12 +202,8 @@ fun KarivaApp(viewModel: KarivaViewModel = viewModel()) {
                                             onError = onError
                                         )
                                     },
-                                    onCustomerSignUp = { name, email, pass, onError ->
-                                        viewModel.signup(
-                                            name, email, pass,
-                                            onSuccess = {},
-                                            onError = onError
-                                        )
+                                    onNavigateToCustomerSignUp = { email ->
+                                        viewModel.navigateToCustomerSignup(email)
                                     },
                                     onCreatorLogin = { email, pass, onError ->
                                         if (email.trim().equals("shikha@kariva.com", ignoreCase = true) && pass == "Shikha@1810") {
@@ -223,6 +219,41 @@ fun KarivaApp(viewModel: KarivaViewModel = viewModel()) {
                                         }
                                     },
                                     onBack = { viewModel.navigateTo(Screen.WELCOME) }
+                                )
+                            }
+
+                            Screen.CUSTOMER_SIGNUP_DETAILS -> {
+                                val prefilledEmail by viewModel.prefilledSignupEmail.collectAsStateWithLifecycle()
+                                CustomerSignupDetailsScreen(
+                                    initialEmail = prefilledEmail,
+                                    isExistingUser = currentUser != null && currentUser?.email?.isNotBlank() == true,
+                                    existingDetails = currentUser?.customerDetails,
+                                    onBack = {
+                                        if (!viewModel.navigateBack()) {
+                                            viewModel.navigateTo(Screen.AUTH)
+                                        }
+                                    },
+                                    onSubmit = { details, password, onError ->
+                                        if (currentUser != null && currentUser?.email?.isNotBlank() == true) {
+                                            viewModel.saveCustomerDetails(
+                                                details = details.copy(
+                                                    customer_uuid = currentUser?.id ?: details.customer_uuid,
+                                                    customer_email = currentUser?.email ?: details.customer_email
+                                                ),
+                                                onSuccess = {
+                                                    viewModel.navigateTo(Screen.HOME)
+                                                },
+                                                onError = onError
+                                            )
+                                        } else {
+                                            viewModel.completeCustomerRegistration(
+                                                details = details,
+                                                pass = password,
+                                                onSuccess = {},
+                                                onError = onError
+                                            )
+                                        }
+                                    }
                                 )
                             }
 
@@ -321,6 +352,7 @@ fun KarivaApp(viewModel: KarivaViewModel = viewModel()) {
                                     onWishlistClick = { viewModel.navigateTo(Screen.WISHLIST) },
                                     onNotificationsClick = { viewModel.navigateTo(Screen.NOTIFICATIONS) },
                                     onTrackOrderClick = { viewModel.openOrderTrack(it) },
+                                    onEditAddressClick = { viewModel.navigateToCustomerSignup(currentUser?.email ?: "") },
                                     onLogout = { viewModel.logout() }
                                 )
                             }

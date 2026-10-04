@@ -12,6 +12,7 @@ enum class Screen {
     WELCOME,
     ONBOARDING,
     AUTH,
+    CUSTOMER_SIGNUP_DETAILS,
     HOME,
     CATEGORIES,
     PRODUCT_DETAIL,
@@ -153,6 +154,14 @@ class KarivaViewModel(application: Application) : AndroidViewModel(application) 
         _toastMessage.value = null
     }
 
+    private val _prefilledSignupEmail = MutableStateFlow("")
+    val prefilledSignupEmail: StateFlow<String> = _prefilledSignupEmail.asStateFlow()
+
+    fun navigateToCustomerSignup(email: String = "") {
+        _prefilledSignupEmail.value = email
+        navigateTo(Screen.CUSTOMER_SIGNUP_DETAILS)
+    }
+
     // Auth actions
     fun login(email: String, pass: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
         viewModelScope.launch {
@@ -161,12 +170,50 @@ class KarivaViewModel(application: Application) : AndroidViewModel(application) 
                 showToast("Welcome to Kariva, ${profile.displayName}!")
                 if (profile.role == UserRole.CREATOR) {
                     navigateTo(Screen.CREATOR_DASHBOARD)
+                } else if (profile.customerDetails == null || profile.customerDetails.customer_house_no.isBlank()) {
+                    // First time login without complete details - redirect to 3-step details screen
+                    _prefilledSignupEmail.value = profile.email
+                    navigateTo(Screen.CUSTOMER_SIGNUP_DETAILS)
                 } else {
                     navigateTo(Screen.HOME)
                 }
                 onSuccess()
             }.onFailure {
                 onError(it.localizedMessage ?: "Authentication failed")
+            }
+        }
+    }
+
+    fun completeCustomerRegistration(
+        details: CustomerDetails,
+        pass: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = repository.completeCustomerRegistration(details, pass)
+            result.onSuccess { profile ->
+                showToast("Welcome to Kariva, ${profile.displayName}!")
+                navigateTo(Screen.HOME)
+                onSuccess()
+            }.onFailure {
+                onError(it.localizedMessage ?: "Registration failed")
+            }
+        }
+    }
+
+    fun saveCustomerDetails(
+        details: CustomerDetails,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = repository.saveCustomerDetails(details)
+            result.onSuccess {
+                showToast("Details updated successfully!")
+                onSuccess()
+            }.onFailure {
+                onError(it.localizedMessage ?: "Update failed")
             }
         }
     }
@@ -179,7 +226,8 @@ class KarivaViewModel(application: Application) : AndroidViewModel(application) 
                 if (profile.role == UserRole.CREATOR) {
                     navigateTo(Screen.CREATOR_DASHBOARD)
                 } else {
-                    navigateTo(Screen.HOME)
+                    _prefilledSignupEmail.value = profile.email
+                    navigateTo(Screen.CUSTOMER_SIGNUP_DETAILS)
                 }
                 onSuccess()
             }.onFailure {

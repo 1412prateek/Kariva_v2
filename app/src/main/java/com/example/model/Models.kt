@@ -5,6 +5,44 @@ enum class UserRole {
     CREATOR
 }
 
+data class CustomerDetails(
+    val customer_id: String = "",
+    val customer_uuid: String = "",
+    val customer_first_name: String = "",
+    val customer_middle_name: String = "",
+    val customer_last_name: String = "",
+    val customer_email: String = "",
+    val customer_mobile_no: String = "",
+    val customer_house_no: String = "",
+    val customer_address_line_1: String = "",
+    val customer_address_line_2: String = "",
+    val customer_district: String = "",
+    val customer_state: String = "",
+    val customer_country: String = "India",
+    val customer_zip_code: String = "",
+    val created_at: Long = System.currentTimeMillis(),
+    val updated_at: Long = System.currentTimeMillis(),
+    val customer_location: Map<String, Any>? = null
+) {
+    val fullFormattedAddress: String
+        get() = listOfNotNull(
+            customer_house_no.ifBlank { null },
+            customer_address_line_1.ifBlank { null },
+            customer_address_line_2.ifBlank { null },
+            customer_district.ifBlank { null },
+            customer_state.ifBlank { null },
+            customer_zip_code.ifBlank { null },
+            customer_country.ifBlank { null }
+        ).joinToString(", ")
+
+    val fullName: String
+        get() = listOfNotNull(
+            customer_first_name.ifBlank { null },
+            customer_middle_name.ifBlank { null },
+            customer_last_name.ifBlank { null }
+        ).joinToString(" ")
+}
+
 data class UserProfile(
     val id: String = "",
     val email: String = "",
@@ -12,7 +50,8 @@ data class UserProfile(
     val role: UserRole = UserRole.CUSTOMER,
     val loyaltyTier: String = "Kariva Artisan Patron",
     val phoneNumber: String = "+91 98765 43210",
-    val address: String = "Sector 14, Urban Estate, Gurugram"
+    val address: String = "Sector 14, Urban Estate, Gurugram",
+    val customerDetails: CustomerDetails? = null
 )
 
 data class PricingTier(

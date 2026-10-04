@@ -45,6 +45,7 @@ fun ProfileScreen(
     onWishlistClick: () -> Unit,
     onNotificationsClick: () -> Unit,
     onTrackOrderClick: (Order) -> Unit,
+    onEditAddressClick: () -> Unit,
     onLogout: () -> Unit
 ) {
     val displayName = user?.displayName ?: "Shopper"
@@ -300,8 +301,9 @@ fun ProfileScreen(
 
                     ProfileMenuItem(
                         icon = Icons.Outlined.LocationOn,
-                        label = "Addresses",
-                        onClick = {}
+                        label = "Delivery Address & Details",
+                        badge = if (user?.customerDetails != null) "Saved" else "Add Now",
+                        onClick = onEditAddressClick
                     )
                     ProfileDivider()
 

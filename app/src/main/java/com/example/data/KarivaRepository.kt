@@ -394,14 +394,31 @@ class KarivaRepository private constructor(private val context: Context) {
             val authResult = fb.signInWithEmailAndPassword(cleanEmail, pass).await()
             val fbUser = authResult.user ?: throw Exception("Authentication returned empty user session.")
             val uid = fbUser.uid
-            val displayName = fbUser.displayName ?: cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
+
+            // Fetch dynamic customer details from Firestore if available
+            var customerDetails: CustomerDetails? = null
+            try {
+                val doc = firestore?.collection("customer_details")?.document(uid)?.get()?.await()
+                if (doc != null && doc.exists()) {
+                    customerDetails = doc.toObject(CustomerDetails::class.java)
+                }
+            } catch (de: Exception) {
+                Log.w("KarivaRepo", "Fetch customer_details error: ${de.message}")
+            }
+
+            val displayName = customerDetails?.fullName?.ifBlank { null }
+                ?: fbUser.displayName
+                ?: cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
 
             val profile = UserProfile(
                 id = uid,
                 email = cleanEmail,
                 displayName = displayName,
                 role = UserRole.CUSTOMER,
-                loyaltyTier = "Kariva Artisan Patron"
+                loyaltyTier = "Kariva Artisan Patron",
+                phoneNumber = customerDetails?.customer_mobile_no ?: "+91 98765 43210",
+                address = customerDetails?.fullFormattedAddress?.ifBlank { null } ?: "Sector 14, Urban Estate, Gurugram",
+                customerDetails = customerDetails
             )
             _currentUser.value = profile
             return Result.success(profile)
@@ -506,6 +523,167 @@ class KarivaRepository private constructor(private val context: Context) {
             }
             return Result.failure(Exception(userMsg))
         }
+    }
+
+    suspend fun completeCustomerRegistration(details: CustomerDetails, pass: String): Result<UserProfile> {
+        val cleanEmail = details.customer_email.trim().lowercase(Locale.ROOT)
+        val fb = auth ?: return Result.failure(Exception("Firebase Authentication is not initialized."))
+
+        try {
+            // 1. Create Firebase Auth user
+            val authResult = fb.createUserWithEmailAndPassword(cleanEmail, pass).await()
+            val fbUser = authResult.user ?: throw Exception("Failed to create user in Firebase.")
+            val uid = fbUser.uid
+
+            // 2. Set Firebase User Display Name
+            try {
+                fbUser.updateProfile(
+                    UserProfileChangeRequest.Builder()
+                        .setDisplayName(details.fullName)
+                        .build()
+                ).await()
+            } catch (pe: Exception) {
+                Log.w("KarivaRepo", "User profile name update notice: ${pe.message}")
+            }
+
+            // 3. Save customer details to Firestore customer_details collection
+            val enrichedDetails = details.copy(
+                customer_id = "cust_${System.currentTimeMillis()}",
+                customer_uuid = uid,
+                customer_email = cleanEmail,
+                created_at = System.currentTimeMillis(),
+                updated_at = System.currentTimeMillis()
+            )
+
+            val firestoreMap = hashMapOf(
+                "customer_id" to enrichedDetails.customer_id,
+                "customer_uuid" to enrichedDetails.customer_uuid,
+                "customer_first_name" to enrichedDetails.customer_first_name,
+                "customer_middle_name" to enrichedDetails.customer_middle_name,
+                "customer_last_name" to enrichedDetails.customer_last_name,
+                "customer_email" to enrichedDetails.customer_email,
+                "customer_mobile_no" to enrichedDetails.customer_mobile_no,
+                "customer_house_no" to enrichedDetails.customer_house_no,
+                "customer_address_line_1" to enrichedDetails.customer_address_line_1,
+                "customer_address_line_2" to enrichedDetails.customer_address_line_2,
+                "customer_district" to enrichedDetails.customer_district,
+                "customer_state" to enrichedDetails.customer_state,
+                "customer_country" to enrichedDetails.customer_country,
+                "customer_zip_code" to enrichedDetails.customer_zip_code,
+                "created_at" to enrichedDetails.created_at,
+                "updated_at" to enrichedDetails.updated_at,
+                "customer_location" to enrichedDetails.customer_location
+            )
+
+            firestore?.collection("customer_details")?.document(uid)?.set(firestoreMap)?.await()
+
+            // Also keep users collection in sync
+            firestore?.collection("users")?.document(uid)?.set(
+                hashMapOf(
+                    "uid" to uid,
+                    "name" to enrichedDetails.fullName,
+                    "email" to cleanEmail,
+                    "role" to "CUSTOMER",
+                    "phoneNumber" to enrichedDetails.customer_mobile_no,
+                    "address" to enrichedDetails.fullFormattedAddress,
+                    "createdAt" to System.currentTimeMillis()
+                )
+            )?.await()
+
+            val profile = UserProfile(
+                id = uid,
+                email = cleanEmail,
+                displayName = enrichedDetails.fullName,
+                role = UserRole.CUSTOMER,
+                loyaltyTier = "Kariva Artisan Patron",
+                phoneNumber = enrichedDetails.customer_mobile_no,
+                address = enrichedDetails.fullFormattedAddress,
+                customerDetails = enrichedDetails
+            )
+            _currentUser.value = profile
+            return Result.success(profile)
+        } catch (e: Exception) {
+            Log.e("KarivaRepo", "Complete customer registration error: ${e.message}", e)
+            val rawMsg = e.localizedMessage ?: e.message ?: ""
+            val userMsg = when {
+                rawMsg.contains("email-already-in-use", ignoreCase = true) ||
+                rawMsg.contains("already registered", ignoreCase = true) ->
+                    "Email is already registered. Please login."
+                rawMsg.contains("CONFIGURATION_NOT_FOUND", ignoreCase = true) ||
+                rawMsg.contains("disabled", ignoreCase = true) ->
+                    "Firebase Email/Password provider is disabled. Please enable 'Email/Password' in Firebase Console under Sign-in method tab."
+                rawMsg.contains("weak-password", ignoreCase = true) ->
+                    "Password must be at least 8 characters long and include an uppercase letter, lowercase letter, number, and special character."
+                rawMsg.contains("invalid-email", ignoreCase = true) ->
+                    "Please enter a valid email address."
+                rawMsg.contains("network-request-failed", ignoreCase = true) ->
+                    "Network error. Please check your internet connection."
+                else -> rawMsg
+            }
+            return Result.failure(Exception(userMsg))
+        }
+    }
+
+    suspend fun saveCustomerDetails(details: CustomerDetails): Result<CustomerDetails> {
+        val uid = details.customer_uuid.ifBlank {
+            auth?.currentUser?.uid ?: _currentUser.value?.id ?: "cust_${UUID.randomUUID().toString().take(8)}"
+        }
+        val customerId = details.customer_id.ifBlank {
+            "cust_${System.currentTimeMillis()}"
+        }
+
+        val enriched = details.copy(
+            customer_id = customerId,
+            customer_uuid = uid,
+            updated_at = System.currentTimeMillis()
+        )
+
+        val firestoreMap = hashMapOf(
+            "customer_id" to enriched.customer_id,
+            "customer_uuid" to enriched.customer_uuid,
+            "customer_first_name" to enriched.customer_first_name,
+            "customer_middle_name" to enriched.customer_middle_name,
+            "customer_last_name" to enriched.customer_last_name,
+            "customer_email" to enriched.customer_email,
+            "customer_mobile_no" to enriched.customer_mobile_no,
+            "customer_house_no" to enriched.customer_house_no,
+            "customer_address_line_1" to enriched.customer_address_line_1,
+            "customer_address_line_2" to enriched.customer_address_line_2,
+            "customer_district" to enriched.customer_district,
+            "customer_state" to enriched.customer_state,
+            "customer_country" to enriched.customer_country,
+            "customer_zip_code" to enriched.customer_zip_code,
+            "created_at" to enriched.created_at,
+            "updated_at" to enriched.updated_at,
+            "customer_location" to enriched.customer_location
+        )
+
+        try {
+            firestore?.collection("customer_details")?.document(uid)?.set(firestoreMap)?.await()
+            firestore?.collection("users")?.document(uid)?.set(
+                hashMapOf(
+                    "uid" to uid,
+                    "name" to enriched.fullName,
+                    "email" to enriched.customer_email,
+                    "phoneNumber" to enriched.customer_mobile_no,
+                    "address" to enriched.fullFormattedAddress,
+                    "role" to "CUSTOMER",
+                    "updated_at" to enriched.updated_at
+                )
+            )?.await()
+        } catch (e: Exception) {
+            Log.e("KarivaRepo", "saveCustomerDetails firestore error: ${e.message}", e)
+        }
+
+        val updatedProfile = (_currentUser.value ?: UserProfile(id = uid, email = enriched.customer_email)).copy(
+            displayName = enriched.fullName.ifBlank { _currentUser.value?.displayName ?: "Artisan Patron" },
+            phoneNumber = enriched.customer_mobile_no,
+            address = enriched.fullFormattedAddress,
+            customerDetails = enriched
+        )
+        _currentUser.value = updatedProfile
+
+        return Result.success(enriched)
     }
 
     fun signOut() {
