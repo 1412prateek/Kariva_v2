@@ -1,0 +1,6 @@
+{
+  "name": "Kariva",
+  "description": "Handcrafted kurus, woolen creations, earpods & phone sleeves, keychains, and artisanal knitwear marketplace with role-based creator studio and live inventory.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
